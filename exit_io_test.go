@@ -264,3 +264,46 @@ func TestGlobalDefinitionsUseInjectedEnv(t *testing.T) {
 		t.Errorf("flag should win: %q %v", got, err)
 	}
 }
+
+func TestHelpSummariesAndDefaults(t *testing.T) {
+	h := newHarness(nil)
+	g := h.cfg.Command("group").ShortHelp("group summary").LongHelp("group details\nsecond line")
+	g.SubCommand("leaf").ShortHelp("leaf summary").LongHelp("leaf details\nmore details").
+		Func(func(*CommandContext) error { return nil }).
+		Config(func(cc *CommandConfig) {
+			cc.Define("NAME").String().Flag("name").Default("").Description("optional name")
+			cc.Define("MODE").String().Flag("mode").Default("fast").Description("mode")
+		})
+
+	for args, want := range map[string][]string{
+		"--help":       {"group summary"},
+		"group --help": {"leaf summary"},
+	} {
+		h.stdout.Reset()
+		if err := h.run(strings.Fields(args)...); err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range want {
+			if !strings.Contains(h.stdout.String(), w) {
+				t.Errorf("%s: missing %q in %q", args, w, h.stdout)
+			}
+		}
+		if strings.Contains(h.stdout.String(), "second line") || strings.Contains(h.stdout.String(), "more details") {
+			t.Errorf("%s: lists should show summaries only: %q", args, h.stdout)
+		}
+	}
+
+	h.stdout.Reset()
+	if err := h.run("group", "leaf", "--help"); err != nil {
+		t.Fatal(err)
+	}
+	out := h.stdout.String()
+	for _, w := range []string{"leaf summary", "leaf details", "more details", "--mode string (default: fast)"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("leaf help lacks %q: %q", w, out)
+		}
+	}
+	if strings.Contains(out, "default: )") || strings.Contains(out, "default: ,") {
+		t.Errorf("an empty default should not be shown: %q", out)
+	}
+}

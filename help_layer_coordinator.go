@@ -189,9 +189,14 @@ func (hc *helpCoordinator) renderCommandHelp(cmd *Command, command, subcommand s
 
 	// Description layer (only if command has description)
 	if cmd.LongHelp != "" || cmd.ShortHelp != "" {
-		description := cmd.LongHelp
-		if description == "" {
-			description = cmd.ShortHelp
+		description := cmd.ShortHelp
+		if cmd.LongHelp != "" && !strings.HasPrefix(cmd.LongHelp, description) {
+			if description != "" {
+				description += "\n\n"
+			}
+			description += cmd.LongHelp
+		} else if cmd.LongHelp != "" {
+			description = cmd.LongHelp
 		}
 		output.WriteString(description)
 		output.WriteString("\n\n")

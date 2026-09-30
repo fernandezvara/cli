@@ -10,6 +10,9 @@ func shouldDisplayDefault(def *Definition) bool {
 	if def.defaultValue == nil {
 		return false
 	}
+	if value, ok := def.defaultValue.(string); ok && value == "" {
+		return false // an empty default just means "optional"
+	}
 	if def.valueType == TypeBool {
 		if value, ok := def.defaultValue.(bool); ok && !value {
 			return false

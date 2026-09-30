@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.1
+
+### Changed
+
+- Command and subcommand lists show each command's `ShortHelp` (else the first line of its `LongHelp`); a command's own help shows its `ShortHelp` followed by its `LongHelp`.
+- Help no longer shows `(default: )` for optional string flags with an empty default.
+
 ## v0.2.0
 
 Made for programs that must control their exit code and be tested in-process.

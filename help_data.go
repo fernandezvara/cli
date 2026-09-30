@@ -103,6 +103,16 @@ func (ue *unifiedExtractor) FilterEnvVars(envVars []flagInfo, mode helpMode) []f
 	return result
 }
 
+// helpSummary is the one-line description of a command in a list: its
+// ShortHelp, else the first line of its LongHelp.
+func helpSummary(cmd *Command) string {
+	if cmd.ShortHelp != "" {
+		return cmd.ShortHelp
+	}
+	first, _, _ := strings.Cut(cmd.LongHelp, "\n")
+	return first
+}
+
 // ExtractSubcommands extracts subcommand information
 func (ue *unifiedExtractor) ExtractSubcommands(cmd *Command) []subcommandInfo {
 	if cmd == nil || len(cmd.SubCommands) == 0 {
@@ -114,11 +124,7 @@ func (ue *unifiedExtractor) ExtractSubcommands(cmd *Command) []subcommandInfo {
 	// Sort subcommands for consistent display
 	for _, name := range slices.Sorted(maps.Keys(cmd.SubCommands)) {
 		subCmd := cmd.SubCommands[name]
-		// Use LongHelp if available, fall back to ShortHelp
-		desc := subCmd.LongHelp
-		if desc == "" {
-			desc = subCmd.ShortHelp
-		}
+		desc := helpSummary(subCmd)
 		subcommands = append(subcommands, subcommandInfo{
 			Name:        name,
 			Description: desc,
@@ -145,16 +151,7 @@ func (ue *unifiedExtractor) extractCommandsData(commands map[string]*Command, ex
 	var commandSummaries []commandSummary
 	for name, cmd := range commands {
 		if name != "" { // Skip empty string command
-			// Use LongHelp if available, fall back to ShortHelp
-			description := cmd.LongHelp
-			if description == "" {
-				description = cmd.ShortHelp
-			}
-			// Get first line for summary
-			lines := strings.Split(description, "\n")
-			if len(lines) > 0 {
-				description = lines[0]
-			}
+			description := helpSummary(cmd)
 
 			commandSummaries = append(commandSummaries, commandSummary{
 				Name:        name,
