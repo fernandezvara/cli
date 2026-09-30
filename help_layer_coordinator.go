@@ -127,10 +127,12 @@ func (hc *helpCoordinator) ShowHelpWithCommands(command, subcommand string, full
 	if command == "" {
 		// Check if there's an empty string command first
 		if commands != nil {
-			if emptyCmd, exists := commands[""]; exists {
-				// Show help for the empty string command
+			if emptyCmd, exists := commands[""]; exists && len(commands) == 1 {
+				// A config-only app: help is the default command's help.
 				cmd = emptyCmd
 			} else {
+				// Otherwise list the commands (the default command's own
+				// help is `app <its name> --help` or the flags of its alias).
 				// No empty string command, show global help
 				return hc.showGlobalHelp(commands)
 			}

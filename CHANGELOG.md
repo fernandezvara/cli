@@ -6,6 +6,7 @@
 
 - Command and subcommand lists show each command's `ShortHelp` (else the first line of its `LongHelp`); a command's own help shows its `ShortHelp` followed by its `LongHelp`.
 - A command that declares no flags now rejects unknown flags (usage error, code 2) and exposes its leftover arguments through `Positional()`; global flags are still accepted.
+- `app --help` and `app help` list the commands when the app has a default command next to other commands (a config-only app still shows the default command's help).
 - Unknown-command errors omit "Did you mean" when nothing is close, and never suggest the default (unnamed) command.
 - Help no longer shows `(default: )` for optional string flags with an empty default.
 

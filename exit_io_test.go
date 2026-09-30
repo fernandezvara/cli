@@ -340,3 +340,15 @@ func TestUnknownCommandMessage(t *testing.T) {
 		t.Errorf("no suggestion should mean no \"Did you mean\": %v", err)
 	}
 }
+
+func TestGlobalHelpWithDefaultCommand(t *testing.T) {
+	h := newHarness(nil)
+	h.cfg.Command("").ShortHelp("run the server").Func(func(*CommandContext) error { return nil })
+	h.cfg.Command("check").ShortHelp("check the config").Func(func(*CommandContext) error { return nil })
+	for _, a := range []string{"--help", "help"} {
+		h.stdout.Reset()
+		if err := h.run(a); err != nil || !strings.Contains(h.stdout.String(), "check the config") {
+			t.Errorf("%s: err %v out %q", a, err, h.stdout)
+		}
+	}
+}
