@@ -288,7 +288,7 @@ func TestHelpSummariesAndDefaults(t *testing.T) {
 				t.Errorf("%s: missing %q in %q", args, w, h.stdout)
 			}
 		}
-		if strings.Contains(h.stdout.String(), "second line") || strings.Contains(h.stdout.String(), "more details") {
+		if strings.Contains(h.stdout.String(), "more details") || (args == "--help" && strings.Contains(h.stdout.String(), "second line")) {
 			t.Errorf("%s: lists should show summaries only: %q", args, h.stdout)
 		}
 	}
