@@ -4,6 +4,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -433,7 +434,10 @@ func (c *Config) findSuggestions(input string) string {
 	var suggestions []string
 	minDistance := 3
 
-	for name := range c.commands {
+	for _, name := range slices.Sorted(maps.Keys(c.commands)) {
+		if name == "" {
+			continue // the default command has no name to suggest
+		}
 		distance := levenshteinDistance(input, name)
 		if distance <= minDistance {
 			suggestions = append(suggestions, name)

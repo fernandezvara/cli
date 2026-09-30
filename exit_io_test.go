@@ -326,3 +326,17 @@ func TestCommandWithoutFlagsIsStrict(t *testing.T) {
 		t.Errorf("positional = %v, err %v", positional, err)
 	}
 }
+
+func TestUnknownCommandMessage(t *testing.T) {
+	h := newHarness(nil)
+	h.cfg.Command("").Func(func(*CommandContext) error { return nil })
+	h.cfg.Command("start").Func(func(*CommandContext) error { return nil })
+	err := h.run("strat")
+	if ExitCode(err) != 2 || err == nil || !strings.Contains(err.Error(), `unknown command: "strat"`) || !strings.Contains(err.Error(), "Did you mean: start?") {
+		t.Errorf("close name: %v", err)
+	}
+	err = h.run("completely-different")
+	if err == nil || strings.Contains(err.Error(), "Did you mean") {
+		t.Errorf("no suggestion should mean no \"Did you mean\": %v", err)
+	}
+}

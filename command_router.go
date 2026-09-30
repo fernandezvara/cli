@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 )
@@ -124,8 +125,11 @@ func (cr *commandRouter) RouteWithHelpHandling(args []string, config *Config) (*
 	// Find command by name or alias
 	cmd := findCommand(config.commands, commandName)
 	if cmd == nil {
-		suggestions := config.findSuggestions(commandName)
-		return nil, nil, usageError(fmt.Errorf("unknown command: %q\nDid you mean: %s?", commandName, suggestions), false)
+		msg := fmt.Sprintf("unknown command: %q", commandName)
+		if suggestions := config.findSuggestions(commandName); suggestions != "no similar commands found" {
+			msg += fmt.Sprintf("\nDid you mean: %s?", suggestions)
+		}
+		return nil, nil, usageError(errors.New(msg), false)
 	}
 
 	// Create initial command context

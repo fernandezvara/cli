@@ -6,6 +6,7 @@
 
 - Command and subcommand lists show each command's `ShortHelp` (else the first line of its `LongHelp`); a command's own help shows its `ShortHelp` followed by its `LongHelp`.
 - A command that declares no flags now rejects unknown flags (usage error, code 2) and exposes its leftover arguments through `Positional()`; global flags are still accepted.
+- Unknown-command errors omit "Did you mean" when nothing is close, and never suggest the default (unnamed) command.
 - Help no longer shows `(default: )` for optional string flags with an empty default.
 
 ## v0.2.0
