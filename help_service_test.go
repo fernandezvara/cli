@@ -183,7 +183,7 @@ func TestGetSubcommandHelp(t *testing.T) {
 
 	// Check help content - updated for new help system format
 	expectedParts := []string{
-		"Usage: user [options]",
+		"user [options]",
 		"User management commands",
 		"Subcommands:",
 		"create       Create a new user",

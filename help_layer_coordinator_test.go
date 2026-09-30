@@ -78,7 +78,7 @@ func TestHelpCoordinator_ShowHelp_WithCommand(t *testing.T) {
 	}
 
 	output := stringOutput.Get()
-	if !strings.Contains(output, "Usage: nonexistent [options]") {
+	if !strings.Contains(output, "nonexistent [options]") {
 		t.Error("Expected simple help output for non-existent command")
 	}
 }

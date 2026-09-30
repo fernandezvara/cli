@@ -1,10 +1,7 @@
 // cli/command_result.go
 package cli
 
-import (
-	"fmt"
-	"os"
-)
+import "fmt"
 
 // CommandResult represents the result of command execution with unified error handling
 type CommandResult struct {
@@ -12,21 +9,6 @@ type CommandResult struct {
 	ExitCode   int
 	ShouldExit bool
 	Message    string
-}
-
-// Handle processes the command result according to its state
-func (r *CommandResult) Handle() {
-	if r.ShouldExit {
-		r.displayAndExit()
-	}
-}
-
-// displayAndExit displays the result message and exits with the appropriate code
-func (r *CommandResult) displayAndExit() {
-	if r.Message != "" {
-		fmt.Fprintln(os.Stderr, r.Message)
-	}
-	os.Exit(r.ExitCode)
 }
 
 // success creates a successful command result
@@ -50,7 +32,7 @@ func errorResult(err error) *CommandResult {
 func validationError(message string) *CommandResult {
 	return &CommandResult{
 		Error:      fmt.Errorf("validation error: %s", message),
-		ExitCode:   1,
+		ExitCode:   ExitUsage,
 		ShouldExit: true,
 		Message:    message,
 	}
@@ -60,7 +42,7 @@ func validationError(message string) *CommandResult {
 func configErrorResult(message string) *CommandResult {
 	return &CommandResult{
 		Error:      fmt.Errorf("configuration error: %s", message),
-		ExitCode:   1,
+		ExitCode:   ExitUsage,
 		ShouldExit: true,
 		Message:    message,
 	}

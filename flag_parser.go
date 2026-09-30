@@ -3,8 +3,10 @@ package cli
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -28,6 +30,29 @@ type ParsedFlags struct {
 }
 
 // flagParser implements FlagParser interface
+// boolFlag stores a boolean flag's value as a string, like every other
+// flag, but lets the flag package treat it as a switch: --flag means true,
+// --flag=false means false, and --flag never swallows the next argument.
+type boolFlag string
+
+func (b *boolFlag) String() string {
+	if b == nil {
+		return ""
+	}
+	return string(*b)
+}
+
+func (b *boolFlag) Set(s string) error {
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return fmt.Errorf("invalid boolean value %q", s)
+	}
+	*b = boolFlag(strconv.FormatBool(v))
+	return nil
+}
+
+func (b *boolFlag) IsBoolFlag() bool { return true }
+
 type flagParser struct{}
 
 // newFlagParser creates a new FlagParser instance
@@ -62,11 +87,18 @@ func (fp *flagParser) parseFlags(args []string, defs map[string]*Definition, fla
 	// Create values map and register flags with correct types
 	values := make(map[string]*string)
 	for key, def := range defs {
-		if def.flag != "" {
-			// Use string values for all flags to maintain consistency
-			// The type conversion will happen during config processing
-			values[key] = flagSet.String(def.flag, "", def.description)
+		if def.flag == "" {
+			continue
 		}
+		if def.valueType == TypeBool {
+			p := new(string)
+			flagSet.Var((*boolFlag)(p), def.flag, def.description)
+			values[key] = p
+			continue
+		}
+		// Every other flag is a string here; the type conversion happens
+		// during config processing.
+		values[key] = flagSet.String(def.flag, "", def.description)
 	}
 
 	// Parse flags and collect any errors

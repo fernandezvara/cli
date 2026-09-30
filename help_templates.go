@@ -27,7 +27,7 @@ func newTemplateComposer() *templateComposer {
 // registerDefaultPartials registers the default template partials
 func (tc *templateComposer) registerDefaultPartials() {
 	// Template partials
-	tc.partials["usage"] = `Usage: {{.Command}} [options]`
+	tc.partials["usage"] = `Usage: {{.Executable}} {{.Command}}{{with .Subcommand}} {{.}}{{end}} [options]`
 	tc.partials["global_usage"] = `Usage: {{.Executable}} <command> [options]`
 	tc.partials["description"] = `{{.Description}}`
 	tc.partials["flags"] = `{{if .Flags}}Flags:

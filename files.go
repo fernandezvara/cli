@@ -68,7 +68,7 @@ func (c *Config) LoadFiles(filenames ...string) error {
 
 // LoadFileFromEnv loads configuration file from environment variable containing the file path
 func (c *Config) LoadFileFromEnv(envVar string) error {
-	filename := os.Getenv(envVar)
+	filename := c.getenv(envVar)
 	if filename == "" {
 		return nil // No environment variable set
 	}
@@ -123,7 +123,7 @@ func (c *Config) getValueFromSource(key string, def *Definition, sourceType Sour
 
 	case SourceEnv:
 		if def.envVar != "" {
-			if envVal := os.Getenv(def.envVar); envVal != "" {
+			if envVal := c.getenv(def.envVar); envVal != "" {
 				return envVal, true
 			}
 		}

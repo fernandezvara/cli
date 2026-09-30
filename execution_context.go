@@ -149,7 +149,11 @@ func (ctx *ExecutionContext) renderErrorsWithCommand(cmd *Command, helpService *
 
 	// Create a simple help display for errors
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Usage: %s [options]\n\n", ctx.command))
+	if exe := helpService.coordinator.executable; ctx.command == exe || ctx.command == "" {
+		builder.WriteString(fmt.Sprintf("Usage: %s [options]\n\n", exe))
+	} else {
+		builder.WriteString(fmt.Sprintf("Usage: %s %s [options]\n\n", exe, ctx.command))
+	}
 
 	if cmd != nil && cmd.LongHelp != "" {
 		builder.WriteString(cmd.LongHelp)

@@ -3,6 +3,8 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 )
 
@@ -14,12 +16,19 @@ type helpOutput interface {
 }
 
 // ConsoleHelpOutput implements HelpOutput for console output
-type ConsoleHelpOutput struct{}
+type ConsoleHelpOutput struct {
+	// W is where help is written; nil means os.Stdout.
+	W io.Writer
+}
 
 // Print prints text to console
 func (cho *ConsoleHelpOutput) Print(text string) error {
-	fmt.Print(text)
-	return nil
+	w := cho.W
+	if w == nil {
+		w = os.Stdout
+	}
+	_, err := io.WriteString(w, text)
+	return err
 }
 
 // Get returns the accumulated output (not applicable for console)

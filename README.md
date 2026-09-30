@@ -388,22 +388,68 @@ cfg.Command("deploy").
 ### Subcommands and Aliases
 
 ```go
-cfg.Command("docker").
-    ShortHelp("Docker operations").
-    Config(func(cc *cli.CommandConfig) {
-        cc.Command("run").
-            Func(dockerRunCommand).
-            ShortHelp("Run Docker container")
-        
-        cc.Command("stop").
-            Func(dockerStopCommand).
-            ShortHelp("Stop Docker container")
-    })
+docker := cfg.Command("docker").ShortHelp("Docker operations")
+
+docker.SubCommand("run").
+    Func(dockerRunCommand).
+    ShortHelp("Run Docker container")
+
+docker.SubCommand("stop").
+    Func(dockerStopCommand).
+    ShortHelp("Stop Docker container")
 
 cfg.Command("start").
     Func(startCommand).
     ShortHelp("Start the service").
     Aliases("run", "up")  // Multiple aliases
+```
+
+### Boolean flags
+
+`Bool()` definitions are switches: `--dry-run` means true, `--dry-run=false` means false, and the flag never takes the next argument as its value.
+
+### Leftover arguments
+
+cli has no positional-argument declarations: pass values as flags (`--realm r --email a@x.io`, with `Required()` and `Default()`). Anything left after the command's flags is available as `ctx.Positional()`, so a command can reject stray arguments.
+
+### Help
+
+`app --help`, `app help`, `app help <command>`, `app <command> --help` and `app <group> help` all print help. A word that is neither a subcommand nor a flag after a group command (`app user zzz`) is a usage error.
+
+## Exit codes, environment and I/O
+
+`Execute` never exits the process. It returns an error, and `cli.ExitCode(err)` gives the exit code to end with:
+
+| Situation | Code |
+|---|---|
+| Success, or help shown | `0` (`cli.ExitOK`) |
+| A command returned an error | `1` (`cli.ExitFailure`) |
+| Unknown command or flag, missing or invalid flag value, unknown subcommand | `2` (`cli.ExitUsage`) |
+| A command returned `cli.Exit(code, err)` | `code` |
+
+```go
+func main() {
+    cfg := cli.New()
+    // ... definitions and commands ...
+    err := cfg.Execute(os.Args)
+    if err != nil && !cli.IsReported(err) {
+        fmt.Fprintln(os.Stderr, err) // configuration errors were already printed
+    }
+    os.Exit(cli.ExitCode(err))
+}
+
+// in a command:
+return cli.Exit(3, errors.New("deploy failed")) // exit code 3
+```
+
+Everything the library reads or writes can be replaced, which makes commands testable in-process:
+
+```go
+cfg.SetName("myapp").                                  // program name in usage lines
+    SetEnv(func(k string) string { return env[k] }).   // instead of os.Getenv
+    SetIO(stdin, stdout, stderr)                       // help -> stdout, errors -> stderr
+
+// in a command: ctx.Getenv("X"), ctx.Stdin(), ctx.Stdout(), ctx.Stderr()
 ```
 
 ## Middleware System

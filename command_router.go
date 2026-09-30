@@ -96,6 +96,10 @@ func (cr *commandRouter) RouteWithHelpHandling(args []string, config *Config) (*
 	remainingArgs := args[2:]
 
 	// Check if the command name is actually a help flag
+	if commandName == "help" && findCommand(config.commands, "help") == nil {
+		commandName = "--help"
+	}
+
 	if isHelpFlag(commandName) {
 		isFull := isFullHelpFlag(commandName)
 		// If there are remaining args, the first one is the command to show help for
@@ -121,7 +125,7 @@ func (cr *commandRouter) RouteWithHelpHandling(args []string, config *Config) (*
 	cmd := findCommand(config.commands, commandName)
 	if cmd == nil {
 		suggestions := config.findSuggestions(commandName)
-		return nil, nil, fmt.Errorf("unknown command: %q\nDid you mean: %s?", commandName, suggestions)
+		return nil, nil, usageError(fmt.Errorf("unknown command: %q\nDid you mean: %s?", commandName, suggestions), false)
 	}
 
 	// Create initial command context
@@ -134,6 +138,10 @@ func (cr *commandRouter) RouteWithHelpHandling(args []string, config *Config) (*
 	}
 
 	// Check for help requests using centralized detection
+	if len(finalCtx.Args) == 1 && finalCtx.Args[0] == "help" && finalCmd.FindSubCommand("help") == nil {
+		finalCtx.Args = []string{"--help"}
+	}
+
 	if lastArgIsHelpFlag(finalCtx.Args) {
 		full := argsContainFullHelp(finalCtx.Args)
 		err := config.getHelpService().ShowHelpUnified(finalCtx.Command, finalCtx.SubCommand, full, []GetError{}, config.commands)

@@ -3,6 +3,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,6 +22,12 @@ type Config struct {
 	processed        bool
 	helpService      *helpService
 	defaultPriority  SourcePriority // Fallback priority for definitions without explicit priority
+
+	env    func(string) string // environment lookup; nil means os.Getenv
+	stdin  io.Reader           // nil means os.Stdin
+	stdout io.Writer           // nil means os.Stdout
+	stderr io.Writer           // nil means os.Stderr
+	name   string              // program name in help; "" means the executable's name
 }
 
 // New creates a new Config instance
@@ -36,6 +43,62 @@ func New() *Config {
 		processed:        false,
 		defaultPriority:  PriorityFlagEnvFileDefault, // Flag > Env > File > Default
 	}
+}
+
+// SetEnv replaces the environment lookup (default os.Getenv), so programs
+// and tests can supply their own environment.
+func (c *Config) SetEnv(getenv func(string) string) *Config {
+	c.env = getenv
+	return c
+}
+
+// SetIO replaces stdin, stdout and stderr (defaults os.Stdin, os.Stdout,
+// os.Stderr). Help goes to stdout; configuration errors go to stderr. A nil
+// argument keeps the default for that stream.
+func (c *Config) SetIO(stdin io.Reader, stdout, stderr io.Writer) *Config {
+	c.stdin, c.stdout, c.stderr = stdin, stdout, stderr
+	if c.helpService != nil {
+		c.helpService = nil // rebuilt on next use, writing to the new stdout
+	}
+	return c
+}
+
+// SetName sets the program name shown in usage lines (default: the
+// executable's base name).
+func (c *Config) SetName(name string) *Config {
+	c.name = name
+	if c.helpService != nil {
+		c.helpService = nil
+	}
+	return c
+}
+
+func (c *Config) getenv(name string) string {
+	if c != nil && c.env != nil {
+		return c.env(name)
+	}
+	return os.Getenv(name)
+}
+
+func (c *Config) errOut() io.Writer {
+	if c != nil && c.stderr != nil {
+		return c.stderr
+	}
+	return os.Stderr
+}
+
+func (c *Config) in() io.Reader {
+	if c != nil && c.stdin != nil {
+		return c.stdin
+	}
+	return os.Stdin
+}
+
+func (c *Config) out() io.Writer {
+	if c != nil && c.stdout != nil {
+		return c.stdout
+	}
+	return os.Stdout
 }
 
 // Define starts a new configuration definition
@@ -237,6 +300,10 @@ func (c *Config) GenerateHelp() string {
 func (c *Config) getHelpService() *helpService {
 	if c.helpService == nil {
 		c.helpService = newHelpService()
+		c.helpService.SetOutput(&ConsoleHelpOutput{W: c.stdout})
+		if c.name != "" {
+			c.helpService.coordinator.executable = c.name
+		}
 	}
 	return c.helpService
 }
@@ -278,8 +345,8 @@ func (c *Config) Execute(args []string) error {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(os.Stderr, helpText)
-			return fmt.Errorf("configuration errors")
+			fmt.Fprintln(c.errOut(), helpText)
+			return usageError(fmt.Errorf("configuration errors"), true)
 		}
 		return nil
 	}
@@ -291,7 +358,7 @@ func (c *Config) Execute(args []string) error {
 	// Route command with integrated help handling
 	cmd, ctx, err := router.RouteWithHelpHandling(args, c)
 	if err != nil {
-		return err
+		return err // usage errors already carry ExitUsage
 	}
 
 	// If no command to execute (help was shown), return success
@@ -329,17 +396,17 @@ func (c *Config) executeWithGlobalMiddleware(cmd *Command, ctx *CommandContext) 
 				if err != nil {
 					return err
 				}
-				fmt.Fprintln(os.Stderr, helpText)
-				os.Exit(1)
+				fmt.Fprintln(c.errOut(), helpText)
+				return usageError(result.Error, true)
 			}
 
 			// Always display the message if it exists
 			if result.Message != "" {
-				fmt.Fprintln(os.Stderr, result.Message)
+				fmt.Fprintln(c.errOut(), result.Message)
 			}
 
 			if result.ShouldExit {
-				result.Handle()
+				return &ExitError{Code: result.ExitCode, Err: result.Error, Reported: result.Message != ""}
 			}
 		}
 		return result.Error

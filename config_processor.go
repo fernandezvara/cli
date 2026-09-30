@@ -3,7 +3,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 )
 
 // ConfigProcessor processes command-specific configuration
@@ -37,6 +36,9 @@ func (cp *configProcessor) ProcessCommandConfig(cmd *Command, ctx *CommandContex
 	services := newCommandServices()
 	flagParser := services.FlagParser
 	parsedFlags, err := flagParser.ParseCommand(ctx.Args, cmd.Definitions)
+	if parsedFlags != nil && parsedFlags.FlagSet != nil {
+		ctx.positional = parsedFlags.FlagSet.Args()
+	}
 
 	// Create temp config with command definitions and inherited global settings
 	tempConfig := &Config{
@@ -45,6 +47,7 @@ func (cp *configProcessor) ProcessCommandConfig(cmd *Command, ctx *CommandContex
 		secrets:         newSecretStore(),
 		flagValues:      parsedFlags.Values,
 		fileConfig:      ctx.GlobalConfig.fileConfig,
+		env:             ctx.GlobalConfig.env,
 		commands:        ctx.GlobalConfig.commands,
 		defaultPriority: ctx.GlobalConfig.defaultPriority,
 	}
@@ -125,7 +128,7 @@ func (cp *configProcessor) ValidateRequiredFlags(cmd *Command, ctx *CommandConte
 
 			// Check environment variable
 			if !hasValue && def.envVar != "" {
-				if envVal := os.Getenv(def.envVar); envVal != "" {
+				if envVal := ctx.GlobalConfig.getenv(def.envVar); envVal != "" {
 					hasValue = true
 				}
 			}

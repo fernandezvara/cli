@@ -189,7 +189,7 @@ func TestDisplayGetErrors(t *testing.T) {
 		t.Fatalf("renderErrorsWithCommand returned error: %v", err)
 	}
 
-	if !contains(outputStr, "Usage: start [options]") {
+	if !contains(outputStr, "start [options]") {
 		t.Error("Expected templated output to contain command usage")
 	}
 	if !contains(outputStr, "Configuration errors:") {

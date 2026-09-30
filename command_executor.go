@@ -1,7 +1,10 @@
 // cli/command_executor.go
 package cli
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // CommandExecutor orchestrates command execution flow
 type CommandExecutor interface {
@@ -55,8 +58,6 @@ func (ce *commandExecutor) validateCommand(cmd *Command, ctx *CommandContext) *C
 	// Check if command has no function but has subcommands
 	if cmd.Func == nil && len(cmd.SubCommands) > 0 {
 		// Use the new help system to show subcommand help
-		helpService := newHelpService()
-
 		// Get commands from the context's global config
 		var commands map[string]*Command
 		if ctx.GlobalConfig != nil {
@@ -71,7 +72,19 @@ func (ce *commandExecutor) validateCommand(cmd *Command, ctx *CommandContext) *C
 			}
 		}
 
+		// A word that names no subcommand is a usage error, not a request for help.
+		if len(ctx.Args) > 0 && !strings.HasPrefix(ctx.Args[0], "-") {
+			return &CommandResult{
+				Error:    usageError(fmt.Errorf("unknown command %q for %q", ctx.Args[0], ctx.Command), false),
+				ExitCode: ExitUsage,
+			}
+		}
+
 		// Show subcommand help using unified system
+		helpService := newHelpService()
+		if ctx.GlobalConfig != nil {
+			helpService = ctx.GlobalConfig.getHelpService()
+		}
 		err := helpService.ShowHelpUnified(ctx.Command, ctx.SubCommand, false, []GetError{}, commands)
 		if err != nil {
 			return errorResult(err)
