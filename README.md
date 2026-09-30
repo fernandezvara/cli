@@ -1,24 +1,35 @@
 # cli
 
-A Go CLI framework that makes building command-line applications simple and enjoyable.
+A Go library for building command-line applications. A configuration key is declared once — with its type, flag, environment variable, file key, default value and validation rules — and resolved automatically from every source. Commands and subcommands get their own flags and generated help.
 
-## Why cli?
+- Typed access through generics: `cli.Get[T]` and `cli.MustGet[T]`
+- Flags, environment variables and config files (JSON, YAML, TOML) with a configurable source priority
+- Validation: ranges, enums, regular expressions, length and item bounds, durations, custom checks
+- Secrets held in guarded memory and masked in dumps and help output
+- Commands, subcommands, aliases and a middleware pipeline
+- `Execute` returns errors that carry exit codes; it never calls `os.Exit`
+- Environment lookup and standard I/O are injectable for in-process testing
 
-cli eliminates the boilerplate and complexity of building CLI applications, letting you focus on your application logic. With type-safe configuration, automatic help generation, and clear error handling, you can create robust CLIs in minutes, not hours.
+## Contents
 
-### What Makes cli Different
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Commands](#commands)
+- [Exit codes, environment and I/O](#exit-codes-environment-and-io)
+- [Middleware](#middleware)
+- [Error handling](#error-handling)
+- [Help output](#help-output)
+- [Examples](#examples)
+- [Benchmarks](#benchmarks)
+- [API reference](#api-reference)
+- [Install](#install)
+- [License](#license)
 
-- **Zero Boilerplate**: Define once, use anywhere - no repetitive setup code
-- **Type Safety**: Compile-time guarantees with generics - no more string-based configuration
-- **Transparent by Default**: Clean output, silent overrides, and clear error messages
-- **Production Features**: File configuration, secret protection, middleware, and comprehensive validation
-- **Performance Optimized**: 68% faster template rendering, 79% fewer allocations
+## Quick start
 
-## Quick Start
+### Configuration-only application
 
-### Configuration-Only Applications
-
-Perfect for services, daemons, and tools that need configuration without commands:
+For services, daemons and tools that need configuration without commands. `cfg.Command("")` registers a default command that runs when no command word is given:
 
 ```go
 package main
@@ -26,50 +37,31 @@ package main
 import (
     "fmt"
     "os"
-    "strings"
-    
+
     "github.com/fernandezvara/cli"
 )
 
 func main() {
     cfg := cli.New()
 
-    // Define your configuration - fluent and readable
-    cfg.Define("PORT").
-        Int64().
-        Env("PORT").
-        Flag("port").
-        Default(8080).
-        Range(1, 65535).
-        Description("HTTP server port")
-
-    cfg.Define("DATABASE_URL").
-        String().
-        Env("DATABASE_URL").
-        Required().
-        Secret().
-        Description("Database connection string")
-
-    // Add empty string command for config-only mode
+    // An empty name makes this the default command.
     cfg.Command("").
         Func(func(ctx *cli.CommandContext) error {
-            // Type-safe access to configuration
             port := cli.MustGet[int64](ctx, "PORT")
-            dbURL := cli.MustGet[string](ctx, "DATABASE_URL")
-            
             fmt.Printf("Server starting on port %d\n", port)
-            fmt.Printf("Database: %s\n", maskSecret(dbURL))
+
+            if s := ctx.CommandConfig.GetSecret("DATABASE_URL"); s.IsSet() {
+                fmt.Printf("Database configured (%d bytes)\n", s.Size())
+            }
             return nil
         }).
         ShortHelp("Start the server").
-        LongHelp("Starts the web server with the specified configuration.").
         Config(func(cc *cli.CommandConfig) {
-            // Add configuration to the default command
             cc.Define("PORT").
                 Int64().
                 Env("PORT").
                 Flag("port").
-                Default(8080).
+                Default(int64(8080)).
                 Range(1, 65535).
                 Description("HTTP server port")
 
@@ -81,65 +73,33 @@ func main() {
                 Description("Database connection string")
         })
 
-    // One line to process everything
-    if err := cfg.Execute(os.Args); err != nil {
-        os.Exit(1)
+    err := cfg.Execute(os.Args)
+    if err != nil && !cli.IsReported(err) {
+        fmt.Fprintln(os.Stderr, err)
     }
-    defer cfg.Destroy()
-}
-
-func maskSecret(secret string) string {
-    if len(secret) <= 8 {
-        return strings.Repeat("*", len(secret))
-    }
-    return secret[:4] + strings.Repeat("*", len(secret)-8) + secret[len(secret)-4:]
+    os.Exit(cli.ExitCode(err))
 }
 ```
 
-**Usage:**
 ```bash
-./app                           # Starts with defaults
-./app --port 9000               # Starts on port 9000
-./app --help                    # Shows help for default command
-DATABASE_URL=... ./app          # Starts with environment variable
+DATABASE_URL=postgres://localhost/db ./app               # start with defaults
+DATABASE_URL=postgres://localhost/db ./app --port 9000   # flag overrides the default
+./app --help                                             # help for the default command
 ```
 
-## Empty String Command - The Magic
+The default command supports everything a named command does — its own definitions, validation, secrets, help and middleware — so configuration-only applications use the same machinery as multi-command tools.
 
-cli introduces an elegant solution for configuration-only applications: the **empty string command** (`cfg.Command("")`). 
+### Command-based application
 
-When you define an empty string command, it becomes the **default action** that executes when no command is provided. This creates a seamless experience for:
-
-- **Services & Daemons** - Run directly with configuration flags
-- **Simple Tools** - No need for subcommands, just configure and run  
-- **Configuration Management** - Perfect for apps that just need to load config and start
-
-**How it works:**
-```bash
-./app                    # Runs empty string command
-./app --port 9000        # Empty string command gets the flag
-./app --help             # Shows help for empty string command
-```
-
-The empty string command has access to all cli features:
-- Type-safe configuration access
-- Environment variable support  
-- Flag parsing and validation
-- Secret management
-- Help generation
-- Error handling
-
-This approach eliminates the need for separate APIs or special cases - configuration-only apps use the exact same command system as complex CLIs!
-
-### Command-Based Applications
-
-Perfect for CLI tools with multiple commands and subcommands:
+For tools with multiple commands. Each command declares its own configuration inside `Config`:
 
 ```go
 package main
 
 import (
     "fmt"
+    "os"
+
     "github.com/fernandezvara/cli"
 )
 
@@ -165,7 +125,7 @@ func main() {
                 Required().
                 OneOf("dev", "staging", "prod").
                 Description("Target environment")
-            
+
             cc.Define("DRY_RUN").
                 Bool().
                 Flag("dry-run").
@@ -178,14 +138,17 @@ func main() {
         ShortHelp("Show application status").
         Aliases("st", "info")
 
-    // Execute with professional help and error handling
-    cfg.Execute(os.Args)
+    err := cfg.Execute(os.Args)
+    if err != nil && !cli.IsReported(err) {
+        fmt.Fprintln(os.Stderr, err)
+    }
+    os.Exit(cli.ExitCode(err))
 }
 
 func deployCommand(ctx *cli.CommandContext) error {
     env := cli.MustGet[string](ctx, "ENVIRONMENT")
     dryRun := cli.MustGet[bool](ctx, "DRY_RUN")
-    
+
     if dryRun {
         fmt.Printf("Would deploy to %s (dry run)\n", env)
     } else {
@@ -200,221 +163,142 @@ func statusCommand(ctx *cli.CommandContext) error {
 }
 ```
 
-## Real-World Usage
+Definitions on `cfg` itself are global: shared by every command. Their flags are parsed from the arguments **before** the command word (`myapp --verbose deploy ...`), and `cli.Get` resolves a key in the command's definitions first, then in the global ones.
 
-### Clear Error Handling
+## Configuration
 
-cli provides clear, actionable error messages that help users fix problems:
+### Types
 
-```bash
-$ go run app.go --port 99999
-Usage: app [options]
-
-Configuration errors:
-  --port int64 (default: 8080) -> value 99999 is greater than maximum 65535
-
-Flags:
-  --port int64 (default: 8080) (valid: 1-65535)
-        HTTP server port
-```
-
-### File Configuration
-
-Load configuration from JSON, YAML, or TOML files with flexible key mapping:
+Seven types:
 
 ```go
-cfg.Define("PORT").
-    Int64().
-    Flag("port").
-    File("server_port").  // Maps to "server_port" in files
-    Default(8080)
-
-cfg.LoadFile("config.json")  // Load once, use everywhere
+cc.Define("NAME").String().Default("app")
+cc.Define("PORT").Int64().Default(int64(8080))
+cc.Define("RATE").Float64().Default(100.0)
+cc.Define("ENABLED").Bool().Default(true)
+cc.Define("TIMEOUT").Duration().Default(30 * time.Second)
+cc.Define("TAGS").StringSlice().Default([]string{"v1", "api"})
+cc.Define("NUMBERS").Int64Slice().Default([]int64{1, 2, 3})
 ```
 
-**config.json:**
+### Validation
+
+```go
+cc.Define("PORT").
+    Int64().
+    Range(1, 65535).
+    Required()
+
+cc.Define("EMAIL").
+    String().
+    Regexp(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`).
+    MinLength(5).
+    MaxLength(100)
+
+cc.Define("LOG_LEVEL").
+    String().
+    OneOf("debug", "info", "warn", "error").
+    Default("info")
+```
+
+`Custom(name, check)` adds a validation function of your own.
+
+### Configuration files
+
+JSON, YAML and TOML are supported. `File(key)` maps a definition to a key in the file:
+
+```go
+cc.Define("PORT").
+    Int64().
+    Flag("port").
+    File("server_port").
+    Default(int64(8080))
+
+cfg.LoadFile("config.json")                 // one file
+cfg.LoadFiles("config.json", "local.json")  // later files override earlier ones
+cfg.LoadFileFromEnv("CONFIG_FILE")          // file path taken from an env var
+```
+
 ```json
 {
   "server_port": 3000,
-  "database_url": "postgres://localhost/mydb",
-  "log_level": "debug"
+  "database_url": "postgres://localhost/mydb"
 }
 ```
 
-### Silent Override Behavior
+### Source priority
 
-CLI tools don't warn about expected behavior:
+Values resolve in priority order — `Flag > Environment > File > Default` by default. A higher-priority source replaces a lower one silently: a flag overriding an environment variable is normal operation, not something to warn about.
 
-```bash
-# Environment variable (8080) -> Flag (3000) -> Works silently
-PORT=8080 go run app.go --port 3000
-Server starting on port 3000
-
-# No confusing warning messages cluttering the output
-```
-
-### Secret Protection
-
-Sensitive data gets special treatment:
+Change the order globally or per definition:
 
 ```go
-cfg.Define("API_KEY").
+cfg.SetDefaultPriority(cli.PriorityFileEnvFlagDefault)
+
+cc.Define("PORT").
+    Int64().
+    Flag("port").
+    Env("PORT").
+    Default(int64(8080)).
+    Priority(cli.PriorityEnvFlagDefault)
+```
+
+Presets: `PriorityFlagEnvFileDefault`, `PriorityFlagEnvDefault`, `PriorityEnvFlagDefault`, `PriorityFileEnvFlagDefault`, `PriorityDefaultOnly`. A priority that references a source the definition doesn't declare is reported as a configuration error.
+
+### Secrets
+
+`Secret()` stores the value in guarded memory instead of the values map; it is masked in `Dump()`, and `Get` refuses to return it:
+
+```go
+cc.Define("API_KEY").
     String().
+    Env("API_KEY").
     Required().
     Secret().
     Description("API authentication key")
 
-// Access safely
-secret := cfg.GetSecret("API_KEY")
-if secret.IsSet() {
-    fmt.Printf("API key configured (%d bytes)\n", secret.Size())
-    // Use secret.String() or secret.Bytes() when actually needed
+// Inside a command — CommandConfig for command keys, GlobalConfig for global ones:
+s := ctx.CommandConfig.GetSecret("API_KEY")
+if s.IsSet() {
+    fmt.Printf("key configured (%d bytes)\n", s.Size())
+    // s.String() / s.Bytes() return the value when needed
 }
 ```
 
-## File Configuration
+`cfg.Destroy()` wipes all stored secrets.
 
-cli supports multiple file formats with flexible key mapping:
+## Commands
 
-### Basic Usage
-
-```go
-cfg.Define("PORT").
-    Int64().
-    Flag("port").
-    File("port_in_file").  // Look for this key in files
-    Default(8080)
-
-cfg.Define("DATABASE_URL").
-    String().
-    File("db_connection").
-    Required().
-    Secret()
-
-// Load from environment variable containing file path
-cfg.LoadFileFromEnv("CONFIG_FILE")
-
-// Or load directly
-cfg.LoadFile("config.json")
-```
-
-### Priority System
-
-Configuration sources resolve in priority order. The default is:
-
-```
-Flag > Environment > File > Default
-```
-
-You can change the order globally or per definition:
-
-```go
-// Global default
-cfg.SetDefaultPriority(cli.PriorityFileEnvFlagDefault)
-
-// Per definition
-cfg.Define("PORT").
-    Int64().
-    Flag("port").
-    Env("PORT").
-    Default(8080).
-    Priority(cli.PriorityEnvFlagDefault)
-```
-
-Built-in presets: `PriorityFlagEnvFileDefault`, `PriorityFlagEnvDefault`, `PriorityEnvFlagDefault`, `PriorityFileEnvFlagDefault`, `PriorityDefaultOnly`. Priorities referencing sources a definition doesn't have are reported as configuration errors.
-
-### Multiple Files
-
-```go
-// Load multiple files (later files override earlier ones)
-cfg.LoadFiles("config.json", "secrets.json", "local.json")
-```
-
-## Configuration Types
-
-### Supported Types
-
-cli has seven core types:
-
-```go
-cfg.Define("NAME").String().Default("app")
-cfg.Define("PORT").Int64().Default(8080)
-cfg.Define("RATE").Float64().Default(100.0)
-cfg.Define("ENABLED").Bool().Default(true)
-cfg.Define("TIMEOUT").Duration().Default(30 * time.Second)
-cfg.Define("TAGS").StringSlice().Default([]string{"v1", "api"})
-cfg.Define("NUMBERS").Int64Slice().Default([]int64{1, 2, 3})
-```
-
-### Rich Validation
-
-```go
-cfg.Define("PORT").
-    Int64().
-    Range(1, 65535).                    // Numeric range
-    Required()                          // Required field
-
-cfg.Define("EMAIL").
-    String().
-    Regexp(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`). // Email format
-    MinLength(5).                      // Minimum length
-    MaxLength(100).                    // Maximum length
-
-cfg.Define("LOG_LEVEL").
-    String().
-    OneOf("debug", "info", "warn", "error"). // Enum validation
-    Default("info")
-```
-
-## Command System
-
-### Commands with Configuration
-
-```go
-cfg.Command("deploy").
-    Func(deployCommand).
-    ShortHelp("Deploy the application").
-    LongHelp("Deploy the application to the specified environment.").
-    Config(func(cc *cli.CommandConfig) {
-        cc.Define("ENVIRONMENT").
-            String().
-            Flag("env").
-            Required().
-            OneOf("dev", "staging", "prod").
-            Description("Target environment")
-    })
-```
-
-### Subcommands and Aliases
+### Subcommands and aliases
 
 ```go
 docker := cfg.Command("docker").ShortHelp("Docker operations")
 
 docker.SubCommand("run").
-    Func(dockerRunCommand).
-    ShortHelp("Run Docker container")
+    Func(dockerRun).
+    ShortHelp("Run a container")
 
 docker.SubCommand("stop").
-    Func(dockerStopCommand).
-    ShortHelp("Stop Docker container")
+    Func(dockerStop).
+    ShortHelp("Stop a container")
 
 cfg.Command("start").
-    Func(startCommand).
+    Func(start).
     ShortHelp("Start the service").
-    Aliases("run", "up")  // Multiple aliases
+    Aliases("run", "up")
 ```
 
 ### Boolean flags
 
-`Bool()` definitions are switches: `--dry-run` means true, `--dry-run=false` means false, and the flag never takes the next argument as its value.
+`Bool()` definitions are switches: `--dry-run` sets the value to true, `--dry-run=false` sets it to false. A boolean flag never consumes the next argument.
 
-### Leftover arguments
+### Positional arguments
 
-cli has no positional-argument declarations: pass values as flags (`--realm r --email a@x.io`, with `Required()` and `Default()`). Anything left after the command's flags is available as `ctx.Positional()`, so a command can reject stray arguments.
+There are no positional-argument declarations: pass values as flags or environment variables. Arguments left after a command's flags are available as `ctx.Positional()`, so a command can use or reject stray arguments.
 
 ### Help
 
-`app --help`, `app help`, `app help <command>`, `app <command> --help` and `app <group> help` all print help. A word that is neither a subcommand nor a flag after a group command (`app user zzz`) is a usage error.
+`app --help`, `app help`, `app help <command>`, `app <command> --help` and `app <group> help` all print help. A word after a group command that is not one of its subcommands (`app user zzz`) is a usage error.
 
 ## Exit codes, environment and I/O
 
@@ -452,7 +336,7 @@ cfg.SetName("myapp").                                  // program name in usage 
 // in a command: ctx.Getenv("X"), ctx.Stdin(), ctx.Stdout(), ctx.Stderr()
 ```
 
-## Middleware System
+## Middleware
 
 Add cross-cutting concerns to your commands:
 
@@ -488,182 +372,158 @@ Built-in middleware:
 | `TimingMiddleware()` | Measure and store execution timing in the context |
 | `ConditionalMiddleware(cond, mw)` | Apply middleware only when a condition holds |
 
-## Clear Help
+## Error handling
 
-cli automatically generates helpful help:
+Usage and configuration errors print to stderr together with the usage line; the exit code is 2:
 
-### Global Help
 ```bash
-$ go run myapp --help
+$ DATABASE_URL=x ./app --port 99999
+Usage: app [options]
+
+Configuration errors:
+  --port int64 (default: 8080, valid: 1-65535, env: PORT) -> value 99999 is greater than maximum 65535
+```
+
+## Help output
+
+Global help:
+
+```bash
+$ myapp --help
 Usage: myapp <command> [options]
 
 Available commands:
-  deploy       Deploy the application
-  start        Start the service (aliases: run, up)
-  status       Show application status
+
+  deploy       Deploy the application to the specified environment.
+  status       (aliases: st, info) Show application status
+
 
 Use 'myapp <command> --help' for command-specific help
 ```
 
-### Command Help
+Command help:
+
 ```bash
-$ go run myapp deploy --help
-Usage: deploy [options]
+$ myapp deploy --help
+Usage: myapp deploy [options]
 
 Deploy the application to the specified environment.
 
 Flags:
-  --env string (required) (oneOf: dev staging prod)
-        Target environment
-  --dry-run bool (default: false)
+  --dry-run bool
         Show what would be deployed
+  --env string (required, oneOf: ['dev', 'staging', 'prod'])
+        Target environment
 ```
 
 ## Examples
 
-cli includes complete examples:
+Three programs under `examples/`:
 
-### Web Server Example
-**Location:** `examples/web-server/`
-
-A  web server demonstrating the **empty string command** approach for configuration-only applications:
+- **web-server** — configuration-only application using the empty string command: environment variables, flags, file loading, secrets, validation
+- **cli-tool** — multi-command tool with subcommands, aliases and a middleware pipeline including token authentication
+- **conversions** — exercises `Get[T]` conversions for every supported type across every source
 
 ```bash
-cd examples/web-server
-
-# Run with defaults (empty string command executes)
-go run main.go
-
-# Use environment variables
-DATABASE_URL="postgres://user:pass@localhost/db" \
-JWT_SIGNING_KEY="your-32-character-secret-key-here" \
-go run main.go
-
-# Override with flags
-go run main.go --port 3000 --host 0.0.0.0 --log-level debug
-
-# Get help for the default command
-go run main.go --help
-
-# Full help with all options
-go run main.go --full-help
+cd examples/web-server && go run main.go --help
+cd examples/cli-tool && go run main.go help
+cd examples/conversions && go run main.go
 ```
 
-**Features demonstrated:**
-- Empty string command for config-only mode
-- Environment variable configuration
-- Flag-based configuration
-- Secret management
-- Validation and error handling
-- Help generation
+## Benchmarks
 
-### CLI Tool Example  
-**Location:** `examples/cli-tool/`
+`benchmark_test.go` contains the benchmarks:
 
-A full-featured CLI tool with commands and middleware:
 ```bash
-cd examples/cli-tool
-
-# Deploy with validation
-go run main.go deploy --env staging --dry-run=true
-
-# Show system status
-go run main.go status --detailed=true
-
-# Manage configuration
-go run main.go config --show-secrets=true
+go test -run=^$ -bench=. -benchmem
 ```
 
-## Performance
+## API reference
 
-cli is optimized for production use:
+### Definition builder
 
-- **68% faster** template rendering
-- **79% fewer** memory allocations
-- **Silent overrides** for transparent CLI behavior
-- **Zero boilerplate** configuration access
-- **Thread-safe** concurrent operations
-
-## API Reference
-
-### Configuration Builder
+Returned by `cfg.Define(key)` and `cc.Define(key)`:
 
 | Method | Description |
 | ------ | ----------- |
-| `Define(key)` | Start defining a configuration key |
 | `String()`, `Int64()`, `Float64()`, `Bool()`, `Duration()`, `StringSlice()`, `Int64Slice()` | Set value type |
-| `Env(name)` | Set environment variable name |
-| `Flag(name)` | Set command-line flag name |
-| `File(key)` | Set file key name |
-| `Default(value)` | Set default value |
-| `Delimiter(d)` | Set delimiter for parsing slice flag values |
+| `Env(name)` | Environment variable name |
+| `Flag(name)` | Command-line flag name |
+| `File(key)` | Config-file key name |
+| `Default(value)` | Default value |
+| `Delimiter(d)` | Delimiter for parsing slice flag values |
 | `Required()` | Mark as required |
-| `Secret()` | Mark as secret (memory protected) |
-| `Description(text)` | Set description for help |
-| `Priority(priority)` | Set per-definition source priority |
+| `Secret()` | Guarded memory; masked in output |
+| `Description(text)` | Text for help |
+| `Priority(p)` | Per-definition source priority |
+| `Min(n)`, `Max(n)`, `Range(min, max)` | Numeric bounds |
+| `OneOf(values...)` | Enum validation (string values) |
+| `Regexp(pattern)` | Regex validation |
+| `MinLength(n)`, `MaxLength(n)` | String length bounds |
+| `MinItems(n)`, `MaxItems(n)` | Slice item-count bounds |
+| `MinDuration(d)`, `MaxDuration(d)` | Duration bounds |
+| `Custom(name, check)` | Custom validation function |
 
-### Validation
-
-| Method | Description |
-| ------ | ----------- |
-| `Min(n)`, `Max(n)` | Set numeric minimum / maximum |
-| `Range(min, max)` | Set numeric range validation |
-| `OneOf(values...)` | Set enum validation (string values) |
-| `Regexp(pattern)` | Set regex validation |
-| `MinLength(n)`, `MaxLength(n)` | Set string length bounds |
-| `MinItems(n)`, `MaxItems(n)` | Set slice item count bounds |
-| `MinDuration(d)`, `MaxDuration(d)` | Set duration bounds |
-| `Custom(name, check)` | Add a custom validation function |
-
-### Access Methods
+### Config
 
 | Method | Description |
 | ------ | ----------- |
-| `Get[T](ctx, key)` | Get value with type T (returns T, error) |
-| `MustGet[T](ctx, key)` | Get value or panic on error |
-| `GetSecret(key)` | Get a secret value (`IsSet`, `Size`, `String`, `Bytes`, `Destroy`) |
-| `IsSecret(key)` | Check if a key is defined as secret |
-| `Dump()` | Map of all configuration values (secrets masked) |
-| `Execute(args)` | Execute with command routing |
-| `Destroy()` | Securely wipe all secrets from memory |
-| `LoadFile(path)` / `LoadFiles(paths...)` | Load configuration file(s) |
-| `LoadFileFromEnv(envVar)` | Load config file whose path is in an env var |
-| `SetDefaultPriority(p)` | Set global default source priority |
-| `GenerateHelp()` | Return generated global help text |
-| `ShowGlobalHelp()` / `ShowCommandHelp(name)` | Print help output |
+| `New()` | Create a Config |
+| `Define(key)` | Define a global configuration key |
+| `Command(name)` | Define a command (`""` is the default command) |
+| `Execute(args)` | Route and run; returns an error carrying an exit code |
+| `SetName(name)` | Program name shown in usage lines |
+| `SetEnv(fn)` | Replace the environment lookup (default `os.Getenv`) |
+| `SetIO(in, out, err)` | Replace stdin, stdout, stderr |
+| `SetDefaultPriority(p)` | Global default source priority |
+| `LoadFile(path)`, `LoadFiles(paths...)`, `LoadFileFromEnv(env)` | Load configuration files |
+| `GetSecret(key)`, `HasSecret(key)`, `IsSecret(key)` | Secret access |
+| `Has(key)`, `Keys()` | Definition lookup |
+| `Dump()` | All values (secrets masked) |
+| `Destroy()` | Wipe all secrets |
+| `GenerateHelp()` | Generated help text |
+| `ShowGlobalHelp()`, `ShowCommandHelp(name)` | Print help |
+| `UseMiddleware(fn)`, `UseMiddlewareForCommands(names, fn)`, `UseMiddlewareForSubcommands(cmd, names, fn)` | Register middleware |
 
-### Command Builder
-
-| Method | Description |
-| ------ | ----------- |
-| `Command(name)` | Define a new command |
-| `Func(fn)` | Set command function |
-| `ShortHelp(text)` | Set short help text |
-| `LongHelp(text)` | Set long help text |
-| `Aliases(names...)` | Set command aliases |
-| `Config(fn)` | Define command-specific config (`cc.Define`, `cc.Command` for subcommands) |
-| `SubCommand(name)` | Add a subcommand builder |
-| `Middleware(fn)` | Add command-specific middleware |
-
-Config-level middleware registration:
+### Command builder
 
 | Method | Description |
 | ------ | ----------- |
-| `UseMiddleware(fn)` | Apply middleware to all commands |
-| `UseMiddlewareForCommands(names, fn)` | Apply middleware to specific commands |
-| `UseMiddlewareForSubcommands(cmd, names, fn)` | Apply middleware to specific subcommands |
+| `Func(fn)` | Command function |
+| `ShortHelp(text)`, `LongHelp(text)` | Help text |
+| `Aliases(names...)` | Command aliases |
+| `Config(fn)` | Command-specific definitions via `cc.Define` |
+| `SubCommand(name)` | Add a subcommand |
+| `Middleware(fn)` | Command-specific middleware |
 
-## Getting Started
+### CommandContext
 
-1. **Install**: `go get github.com/fernandezvara/cli`
-2. **Try Examples**: `cd examples/web-server && go run main.go`
-3. **Read Documentation**: Check the examples for real-world patterns
-4. **Build**: Start with configuration-only mode, add commands as needed
+| Member | Description |
+| ------ | ----------- |
+| `Args`, `Command`, `SubCommand` | Invocation details |
+| `GlobalConfig`, `CommandConfig` | Resolved configuration |
+| `Positional()` | Arguments left after flag parsing |
+| `Getenv(name)` | Environment lookup through `SetEnv` |
+| `Stdin()`, `Stdout()`, `Stderr()` | Streams from `SetIO` |
+| `Set(k, v)`, `GetData(k)` | Middleware data sharing |
+
+### Package functions and exit codes
+
+| Function | Description |
+| ------ | ----------- |
+| `Get[T](ctx, key)` | Typed lookup (returns `T`, `error`) |
+| `MustGet[T](ctx, key)` | Typed lookup or panic |
+| `Exit(code, err)` | Error that makes `ExitCode` report `code` |
+| `ExitCode(err)` | Exit code for the error `Execute` returned |
+| `IsReported(err)` | Whether the library already printed the error |
+| `ExitOK`, `ExitFailure`, `ExitUsage` | Exit codes 0, 1, 2 |
+
+## Install
+
+```bash
+go get github.com/fernandezvara/cli
+```
 
 ## License
 
-MIT License - feel free to use cli in your projects!
-
----
-
-**cli**: Professional CLI applications, simplified.
+MIT

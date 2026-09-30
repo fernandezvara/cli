@@ -1,63 +1,53 @@
-# CLI Tool Example
+# CLI tool example
 
-A comprehensive command-line application demonstrating cli's command system, middleware pipeline, authentication, and advanced features.
+A command-line application demonstrating cli's command system, middleware pipeline and token authentication.
 
-## Features Demonstrated
+## What it demonstrates
 
-- **Command system** - Multiple commands with subcommands and aliases
-- **Middleware pipeline** - Global, command-specific, and custom middleware
-- **Authentication** - Token-based auth for admin and API commands
-- **Help customization** - Professional help system with long/short descriptions
-- **Priority configuration** - Environment and flag source ordering
-- **Error handling** - Unified cfg.Execute() API with professional error display
-- **Rate limiting** - Built-in rate limiting for sensitive operations
-- **Command aliases** - Multiple command names for the same functionality
+- **Command system** - Commands, subcommands and aliases
+- **Middleware pipeline** - Global, command-specific and custom middleware
+- **Authentication** - Token-based auth middleware on the deploy command
+- **Help** - Generated help with long/short descriptions
+- **Source priority** - Environment and flag source ordering
+- **Error handling** - Errors returned by `Execute` with exit codes
+- **Command aliases** - Multiple names for the same command
 
 ## Usage
 
-### Basic Commands
+### Basic commands
 ```bash
-# Show help
+# Help
 go run main.go help
-go run main.go ?
+go run main.go --help
+go run main.go help deploy
 
-# Show system status
-API_KEY=your-api-key go run main.go status
-go run main.go status --detailed
-
-# Show API status
-API_KEY=your-api-key go run main.go status api
+# System status
+go run main.go status
+go run main.go status --detailed --format json
 ```
 
-### Deploy Commands
+### Deploy (requires ADMIN_TOKEN)
 ```bash
-# Deploy to staging
-go run main.go deploy --env staging
-
-# Deploy with specific branch
-go run main.go deploy --env prod --branch feature/new-ui
-
-# Dry run deployment
-go run main.go deploy --env staging --dry-run
-
-# Force deployment
-go run main.go deploy --env prod --force --skip-tests
-
-# Deploy subcommands
-go run main.go deploy rollback --version v1.2.1
-go run main.go deploy status --env prod
+ADMIN_TOKEN=your-admin-token go run main.go deploy --env staging
+ADMIN_TOKEN=your-admin-token go run main.go deploy --env staging --dry-run
+ADMIN_TOKEN=your-admin-token go run main.go deploy --env prod --force --skip-tests --branch feature/new-ui
 ```
 
-### Admin Commands (Authentication Required)
+`ADMIN_TOKEN` is checked by `tokenAuthMiddleware`, attached to `deploy` only.
+
+### Docker subcommands
 ```bash
-# List users
-ADMIN_TOKEN=your-admin-token go run main.go admin users --action list
+go run main.go docker run --image myapp:v2 --port 8080 --detach
+go run main.go docker stop --container-id abc123 --timeout 10s
+go run main.go docker logs --container-id abc123 --tail 50 --follow
+go run main.go docker status --filter running
+```
 
-# Create user
-ADMIN_TOKEN=your-admin-token go run main.go admin users --action create --username newuser --role admin
-
-# Shutdown service
-ADMIN_TOKEN=your-admin-token go run main.go admin shutdown --graceful --delay 60s
+### Admin commands
+```bash
+go run main.go admin-users --action list --username alice
+go run main.go admin-users --action create --username newuser --role admin
+go run main.go admin-shutdown --graceful --delay 60s
 ```
 
 ### Configuration Management
@@ -74,66 +64,52 @@ go run main.go config --validate-only
 
 ## Command Structure
 
-### Global Options
-These options apply to all commands:
+### Global options
+Shared by all commands; they are also available as environment variables (`VERBOSE`, `LOG_LEVEL`, `TIMEOUT`, `ADMIN_TOKEN`, `API_KEY`):
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | --verbose | bool | false | Enable verbose logging |
 | --log-level | string | info | Logging level (debug/info/warn/error) |
-| --config | string | - | Configuration file path |
 | --timeout | duration | 30s | Operation timeout |
 
-### Deploy Command
-```bash
-cli-tool deploy [options] [subcommand]
-```
+### deploy
+`cli-tool deploy [options]` — aliases `dep`, `release`; `ADMIN_TOKEN` required by middleware.
 
 **Flags:**
 - `--env` (required): Target environment (dev/staging/prod)
-- `--dry-run`: Perform dry run without changes
+- `--dry-run`: Perform a dry run
 - `--skip-tests`: Skip running tests
 - `--force`: Force deployment despite checks
-- `--branch`: Git branch to deploy (default: main)
-- `--tag`: Git tag to deploy
+- `--branch`: Git branch to deploy (default: main, also env `DEPLOY_BRANCH`)
+
+### docker
+`cli-tool docker [subcommand]`
 
 **Subcommands:**
-- `rollback --version <version>`: Rollback to specific version
-- `status --env <env>`: Show deployment status
+- `run` — `--image` (default myapp:latest), `--port` (1024–65535 via custom validator), `--detach`, `--env`
+- `stop` — `--container-id` (required), `--timeout`
+- `logs` — `--container-id` (required), `--follow`, `--tail` (0–10000 via custom validator)
+- `status` — `--filter`, `--verbose`
 
-### Admin Command
-```bash
-cli-tool admin [subcommand]
-```
+### admin-users
+`cli-tool admin-users` — `--action` (required: list/create/delete/update), `--username`, `--role` (admin/user/readonly)
 
-**Requires:** `ADMIN_TOKEN` environment variable
+### admin-shutdown
+`cli-tool admin-shutdown` — `--graceful` (default true), `--delay` (default 30s)
 
-**Subcommands:**
-- `users --action <action>`: Manage users
-  - Actions: list, create, delete, update
-  - Flags: `--username`, `--role`
-- `shutdown`: Shutdown service
-  - Flags: `--graceful`, `--delay`
+### status
+`cli-tool status` — `--detailed`, `--format` (text/json)
 
-### Status Command
-```bash
-cli-tool status [subcommand]
-```
+### config
+`cli-tool config` — `--show-secrets`, `--validate-only`
 
-**Requires:** `API_KEY` environment variable
+### help, custom-test
+`help` prints a custom help page (aliases `--help`, `-h`); `custom-test` shows how command definitions combine with custom help.
 
-**Flags:**
-- `--detailed`: Show detailed status
-- `--format`: Output format (text/json/yaml)
+## Middleware pipeline
 
-**Subcommands:**
-- `api --endpoint <path>`: API service status
-- `database`: Database status
-  - Flags: `--check-connection`, `--show-stats`
-
-## Middleware Pipeline
-
-The example demonstrates a comprehensive middleware pipeline:
+The middleware pipeline in this example:
 
 ### Global Middleware (applies to all commands)
 1. **RecoveryMiddleware** - Catches panics and provides clean error messages
@@ -182,27 +158,15 @@ cfg.Command("deploy").
     Middleware(tokenAuthMiddleware("ADMIN_TOKEN"))
 ```
 
-## Authentication Examples
+## Authentication
 
-### Admin Authentication
+`tokenAuthMiddleware("ADMIN_TOKEN")` is attached to `deploy` with `CommandBuilder.Middleware`, so it runs after the command's configuration is resolved and can read `ctx.CommandConfig`. Without `ADMIN_TOKEN` the command fails with `missing authentication token`:
+
 ```bash
-# Set admin token
-export ADMIN_TOKEN="your-secure-admin-token"
-
-# Run admin commands
-go run main.go admin users --action list
-go run main.go admin shutdown --graceful
+ADMIN_TOKEN=your-admin-token go run main.go deploy --env staging
 ```
 
-### API Authentication
-```bash
-# Set API key
-export API_KEY="your-api-key"
-
-# Run status commands
-go run main.go status --detailed
-go run main.go status api --endpoint /health
-```
+`ADMIN_TOKEN` and `API_KEY` are defined as global secrets, so other commands can read them the same way when needed.
 
 ## Command Aliases
 
@@ -214,34 +178,34 @@ go run main.go deploy
 go run main.go dep
 go run main.go release
 
-# Help command aliases
+# Help
 go run main.go help
-go run main.go ?
 go run main.go --help
 go run main.go -h
+go run main.go help deploy
 ```
 
-## Error Handling
+## Error handling
 
-The example uses cli's unified error handling:
+`Execute` returns errors carrying an exit code; `main` maps them with `cli.ExitCode`:
 
 ```bash
 # Missing required option
 go run main.go deploy
-# Shows: --env string (required) -> value not provided
+# Shows: --env string (required, oneOf: ['dev', 'staging', 'prod']) -> Not provided
 
 # Invalid option value
 go run main.go deploy --env invalid
-# Shows: --env string -> value invalid is not one of [dev staging prod]
+# Shows: --env string (required, oneOf: ['dev', 'staging', 'prod']) -> value 'invalid' is not one of: [dev staging prod]
 
-# Authentication failure
-go run main.go admin users --action list
-# Shows: authentication failed: admin token not provided
+# Authentication failure (deploy middleware)
+go run main.go deploy --env staging
+# Logs: Error in command deploy: missing authentication token (config key: ADMIN_TOKEN)
 ```
 
-## Help System
+## Help
 
-Professional help is automatically generated:
+Help is generated from the command and flag definitions:
 
 ```bash
 # Global help
@@ -256,5 +220,3 @@ go run main.go deploy --help
 go run main.go admin users --help
 # Shows: Users subcommand options and usage
 ```
-
-This example showcases cli's complete command system capabilities for production CLI applications.

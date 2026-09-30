@@ -1,75 +1,71 @@
-# Web Server Example
+# Web server example
 
-A web server demonstrating cli's **empty string command** approach for configuration-only applications.
+A configuration-only application: no subcommands, just configuration resolved from environment variables, flags, a config file and defaults. It uses the empty string command — `cfg.Command("")` runs when no command word is given.
 
-## Features Demonstrated
+## What it demonstrates
 
-- **Empty string command** - Default action when no command provided
-- **Configuration-only mode** - No subcommands, pure configuration processing
-- **Type-safe configuration** - Compile-time guarantees with generics
-- **Multiple sources** - Environment variables, flags, defaults
-- **Secret management** - Memory-protected sensitive values
-- **Help generation** - Automatic help for configuration options
-- **Validation** - Type checking, ranges, required fields
-- **Professional error handling** - Clear error messages and suggestions
+- Empty string command as the default action
+- Multiple configuration sources: environment variables, flags, file keys, defaults
+- Secrets held in guarded memory
+- Validation: ranges, regular expressions, required fields, durations, slices
+- Help generated from the definitions
 
-## Empty String Command Magic
-
-This example uses `cfg.Command("")` to create a **default command** that executes when no command is provided:
+## How it works
 
 ```bash
-# These all execute the empty string command:
-./web-server                    # Runs with defaults
-./web-server --port 9000        # Runs with port 9000
-./web-server --help             # Shows help for default command
-DATABASE_URL=... ./web-server  # Runs with environment variable
+./web-server                    # runs the default command
+./web-server --port 9000        # flags of the default command
+./web-server --help             # help for the default command
+DATABASE_URL=... ./web-server   # values from the environment
 ```
 
-The empty string command has full access to:
-- Type-safe configuration access
-- Environment variable support
-- Flag parsing and validation
-- Secret management
-- Help generation
-- Error handling
+Configuration is declared in two places in `main.go`:
+
+- global `cfg.Define` calls cover every key the program reads, including env-only and file-only keys,
+- the command's `Config(func(cc))` re-declares the keys that take flags, so `--port`, `--host` and `--log-level` parse against the command.
+
+`cli.Get` resolves a key in the command's definitions first and falls back to the global ones; the global secrets are read back through `ctx.GlobalConfig.GetSecret`.
+
+A command-level `cc.Define` replaces the global definition of the same key for that command — constraints such as `Range` or `Required` are not inherited, so the command definitions below repeat the essentials and intentionally skip the rest.
 
 ## Usage
 
-### Basic Usage
 ```bash
-# Run with defaults (empty string command executes)
-go run main.go
+go run main.go                                                # run with defaults
 
-# Set environment variables
-PORT=3000 LOG_LEVEL=debug go run main.go
+PORT=3000 LOG_LEVEL=debug go run main.go                      # environment variables
+go run main.go --port 3000 --host 0.0.0.0 --log-level debug   # flags
 
-# Use command-line flags
-go run main.go --port 3000 --host 0.0.0.0 --log-level debug
-
-# Get help for the default command
-go run main.go --help
-
-# Get full help with all options
-go run main.go --full-help
+go run main.go --help        # help for the default command
+go run main.go --full-help   # extended help
 ```
 
-### With Secrets
+Required values come from the environment:
+
 ```bash
-# Required secrets and URLs
 DATABASE_URL="postgres://user:pass@localhost/db" \
 JWT_SIGNING_KEY="your-32-character-secret-key-here" \
+BASE_URL="https://example.com" \
 go run main.go
 ```
 
-## Configuration Options
+## Configuration
 
-| Option | Type | Sources | Default | Description |
-|--------|------|---------|---------|-------------|
-| PORT | int64 | flag, env, default | 8080 | HTTP server port |
-| HOST | string | flag, env, default | localhost | Server host |
-| LOG_LEVEL | string | flag, env, default | info | Logging level (debug, info, warn, error) |
-| DATABASE_URL | string | env | optional, secret | Database connection URL |
-| JWT_SIGNING_KEY | string | env | optional, secret | JWT signing key |
+| Key | Type | Sources | Notes |
+|-----|------|---------|-------|
+| PORT | int64 | env, flag, file, default 8080 | range 1–65535 |
+| HOST | string | env, flag, file, default localhost | |
+| BASE_URL | string | env, flag | required, must match `^https?://` |
+| DATABASE_URL | string | env | required, secret, min length 10 |
+| REDIS_URL | string | env | secret |
+| LOG_LEVEL | string | env, flag, default info | one of debug/info/warn/error |
+| ACCESS_TOKEN_TTL | duration | env, default 15m | between 1m and 24h |
+| CORS_ORIGINS | []string | env, flag, default `http://localhost:3000` | comma-separated |
+| JWT_SIGNING_KEY | string | env | required, secret, min length 32 |
+| ENVIRONMENT | string | env, flag, default development | one of development/staging/production |
+| MAX_CONNECTIONS | int64 | env, default 100 | range 1–1000 |
+| ENABLE_METRICS | bool | env, flag, default true | |
+| LOG_PERMS | string | env, default `0640` | octal `^0[0-7]{3}$` |
 
 ## Code Structure
 
@@ -100,65 +96,27 @@ cfg.Command("").
     LongHelp("Starts the web server with the specified configuration.").
     Config(func(cc *cli.CommandConfig) {
         // Add configuration to the default command
-        cc.Define("PORT").Int64().Env("PORT").Flag("port").Default(8080)
+        cc.Define("PORT").Int64().Env("PORT").Flag("port").Default(int64(8080))
         cc.Define("HOST").String().Env("HOST").Flag("host").Default("localhost")
         // ... more configuration
     })
 ```
 
-## Error Handling
+## Errors
 
-The example uses the unified `cfg.Execute()` API with professional error display:
-
-```bash
-# Missing required field (if any were required)
-go run main.go
-# Shows: Configuration errors with detailed help
-
-# Validation errors
-PORT=99999 go run main.go  
-# Shows: --port int64 -> value 99999 is greater than maximum 65535
-```
-
-## Secret Management
-
-Sensitive values are automatically memory-protected:
-
-```go
-// Access secrets safely in the command function
-if dbSecret := ctx.GlobalConfig.GetSecret("DATABASE_URL"); dbSecret.IsSet() {
-    fmt.Printf("Database: %s\n", maskSecret(dbSecret.String()))
-}
-
-// Helper function to mask secrets in output
-func maskSecret(secret string) string {
-    if len(secret) <= 8 {
-        return strings.Repeat("*", len(secret))
-    }
-    return secret[:4] + strings.Repeat("*", len(secret)-8) + secret[len(secret)-4:]
-}
-```
-
-## Help System
-
-Automatic help generation for the empty string command:
+Invalid or missing configuration prints a usage line and the per-key problems to stderr:
 
 ```bash
-# Basic help
-go run main.go --help
-# Shows: Usage, description, flags, environment variables
+$ go run main.go
+Usage: main [options]
 
-# Full help with all options
-go run main.go --full-help  
-# Shows: All available options including optional ones
+Starts the web server with the specified configuration.
+...
+
+Configuration errors:
+  --base-url string (required, pattern: ^https?://, env: BASE_URL) -> Not provided
 ```
 
-## Key Benefits of Empty String Command
+## Secrets
 
-- **Zero Boilerplate** - No separate APIs needed for config-only apps  
-- **Type Safety** - Compile-time guarantees with generics  
-- **Natural Usage** - `./app` just works, `./app --port 9000` works too  
-- **Full Features** - Help, validation, secrets, everything works  
-- **Consistent** - Same patterns as command-based CLIs  
-
-This example showcases how cli's empty string command creates elegant configuration-only applications with zero compromise on features or developer experience.
+The command function reads secrets through `ctx.GlobalConfig.GetSecret` (they are defined globally); `IsSet`, `Size`, `String` and `Bytes` expose them without printing the raw value — `maskSecret` in `main.go` is a small helper for display.
