@@ -2,6 +2,8 @@
 package cli
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"strings"
 )
@@ -113,6 +115,28 @@ func (ce *commandExecutor) processConfiguration(cmd *Command, ctx *CommandContex
 		// Validate required flags and log warnings for designers
 		if result := configProcessor.ValidateRequiredFlags(cmd, ctx); result.Error != nil {
 			return result // Should not error for validation, but check anyway
+		}
+	} else {
+		// A command that declares no flags of its own takes only the global
+		// ones; whatever is left over is positional.
+		defs := map[string]*Definition{}
+		if ctx.GlobalConfig != nil {
+			defs = ctx.GlobalConfig.definitions
+		}
+		flagParser := services.FlagParser
+		parsed, _ := flagParser.ParseCommand(ctx.Args, defs)
+		ctx.positional = parsed.FlagSet.Args()
+		var errs []error
+		for _, err := range parsed.Errors {
+			if !errors.Is(err, flag.ErrHelp) {
+				errs = append(errs, err)
+			}
+		}
+		if len(errs) > 0 {
+			for _, configErr := range flagParser.ConvertFlagErrorsToConfigErrors(errs, defs) {
+				ctx.execution.CollectConfigError(ctx.GlobalConfig, configErr)
+			}
+			return configErrorResult("configuration errors detected")
 		}
 	}
 

@@ -307,3 +307,22 @@ func TestHelpSummariesAndDefaults(t *testing.T) {
 		t.Errorf("an empty default should not be shown: %q", out)
 	}
 }
+
+func TestCommandWithoutFlagsIsStrict(t *testing.T) {
+	h := newHarness(nil)
+	var positional []string
+	h.cfg.Command("plain").Func(func(ctx *CommandContext) error {
+		positional = ctx.Positional()
+		return nil
+	})
+	err := h.run("plain", "--bogus")
+	if ExitCode(err) != 2 || !IsReported(err) || !strings.Contains(h.stderr.String(), "bogus") {
+		t.Errorf("unknown flag: code %d reported %v stderr %q", ExitCode(err), IsReported(err), h.stderr)
+	}
+	if err := h.run("plain", "extra", "more"); err != nil || len(positional) != 2 || positional[0] != "extra" {
+		t.Errorf("positional = %v, err %v", positional, err)
+	}
+	if err := h.run("plain"); err != nil || len(positional) != 0 {
+		t.Errorf("positional = %v, err %v", positional, err)
+	}
+}
